@@ -3,34 +3,78 @@ echo "==============="
 echo "firmware parser"
 echo "==============="
 echo "First we need to see if you have binwalk installed as it is essential for this script."
-# Check for binwalk installation
-if ! command -v binwalk &> /dev/null
-then
-    echo -e "${YELLOW}Binwalk not found.${NC}"
-    echo -e "${BLUE}Installing binwalk...${NC}"
+# Check for required tools
+REQUIRED_TOOLS=("binwalk" "john" "curl" "jq" "strings")
 
-    if command -v apt &> /dev/null
+for TOOL in "${REQUIRED_TOOLS[@]}"
+do
+    if ! command -v "$TOOL" &> /dev/null
     then
-        sudo apt update
-        sudo apt install -y binwalk
+        echo -e "${YELLOW}$TOOL not found.${NC}"
+        echo -e "${BLUE}Installing $TOOL...${NC}"
 
-    elif command -v dnf &> /dev/null
-    then
-        sudo dnf install -y binwalk
+        if command -v apt &> /dev/null
+        then
+            case "$TOOL" in
+                strings)
+                    sudo apt update
+                    sudo apt install -y binutils
+                    ;;
+                john)
+                    sudo apt update
+                    sudo apt install -y john
+                    ;;
+                *)
+                    sudo apt update
+                    sudo apt install -y "$TOOL"
+                    ;;
+            esac
 
-    elif command -v pacman &> /dev/null
-    then
-        sudo pacman -S --noconfirm binwalk
+        elif command -v dnf &> /dev/null
+        then
+            case "$TOOL" in
+                strings)
+                    sudo dnf install -y binutils
+                    ;;
+                john)
+                    sudo dnf install -y john
+                    ;;
+                *)
+                    sudo dnf install -y "$TOOL"
+                    ;;
+            esac
+
+        elif command -v pacman &> /dev/null
+        then
+            case "$TOOL" in
+                strings)
+                    sudo pacman -S --noconfirm binutils
+                    ;;
+                john)
+                    sudo pacman -S --noconfirm john
+                    ;;
+                *)
+                    sudo pacman -S --noconfirm "$TOOL"
+                    ;;
+            esac
+
+        else
+            echo -e "${RED}Could not determine package manager.${NC}"
+            echo "Please install $TOOL manually."
+            exit 1
+        fi
+
+        # Verify installation
+        if ! command -v "$TOOL" &> /dev/null
+        then
+            echo -e "${RED}Failed to install $TOOL.${NC}"
+            exit 1
+        fi
 
     else
-        echo -e "${RED}Could not determine package manager.${NC}"
-        echo "Please install binwalk manually."
-        exit 1
+        echo -e "${GREEN}$TOOL detected.${NC}"
     fi
-
-else
-    echo -e "${GREEN}Binwalk detected.${NC}"
-fi
+done
 sleep 2
 echo "                          "
 echo "Please note stuff like ~ will not work and you must use /home/User. Also this will only work on your user and not on root."
@@ -283,3 +327,99 @@ done
 echo
 echo -e "${GREEN}Interesting file scan complete.${NC}"
 echo -e "${GREEN}Report saved to:${NC} $FILE_REPORT"
+
+echo
+echo -e "${BLUE}=========================================${NC}"
+echo -e "${BLUE}BusyBox CVE Lookup${NC}"
+echo -e "${BLUE}=========================================${NC}"
+
+BUSYBOX_CVE_REPORT="$OUTPUT_DIR/busybox_cve_report.txt"
+
+echo "BusyBox CVE Report" > "$BUSYBOX_CVE_REPORT"
+echo "Generated: $(date)" >> "$BUSYBOX_CVE_REPORT"
+echo "========================================" >> "$BUSYBOX_CVE_REPORT"
+
+# Find BusyBox binary
+BUSYBOX=$(find "$OUTPUT_DIR" -type f -name "busybox" | head -n1)
+
+if [ -z "$BUSYBOX" ]; then
+    echo -e "${YELLOW}BusyBox not found. Skipping CVE lookup.${NC}"
+    echo "BusyBox not found." >> "$BUSYBOX_CVE_REPORT"
+else
+
+    echo -e "${GREEN}BusyBox found:${NC} $BUSYBOX"
+
+    VERSION=$(strings "$BUSYBOX" | grep -oE "BusyBox v[0-9]+\.[0-9]+(\.[0-9]+)?" | head -n1)
+
+    if [ -z "$VERSION" ]; then
+        echo -e "${YELLOW}Unable to determine BusyBox version.${NC}"
+        echo "Version not detected." >> "$BUSYBOX_CVE_REPORT"
+    else
+
+        VERSION_NUMBER=$(echo "$VERSION" | grep -oE "[0-9]+\.[0-9]+(\.[0-9]+)?")
+
+        echo -e "${GREEN}Detected:${NC} $VERSION"
+
+        {
+            echo
+            echo "BusyBox Binary:"
+            echo "$BUSYBOX"
+            echo
+            echo "Version:"
+            echo "$VERSION"
+            echo
+            echo "Searching NVD..."
+            echo
+        } >> "$BUSYBOX_CVE_REPORT"
+
+        RESPONSE=$(curl -s "https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=BusyBox%20$VERSION_NUMBER")
+
+        COUNT=$(echo "$RESPONSE" | jq '.totalResults')
+
+        if [ "$COUNT" -eq 0 ]; then
+
+            echo -e "${YELLOW}No CVEs found.${NC}"
+            echo "No CVEs found." >> "$BUSYBOX_CVE_REPORT"
+
+        else
+
+            echo -e "${GREEN}$COUNT CVEs Found${NC}"
+
+            echo "$RESPONSE" | jq -r '
+                .vulnerabilities[] |
+                "========================================",
+                .cve.id,
+                "Description:",
+                .cve.descriptions[0].value,
+                "Severity: " + (
+                    if .cve.metrics.cvssMetricV31 then
+                        .cve.metrics.cvssMetricV31[0].cvssData.baseSeverity
+                    elif .cve.metrics.cvssMetricV30 then
+                        .cve.metrics.cvssMetricV30[0].cvssData.baseSeverity
+                    elif .cve.metrics.cvssMetricV2 then
+                        .cve.metrics.cvssMetricV2[0].baseSeverity
+                    else
+                        "Unknown"
+                    end
+                ),
+                "CVSS: " + (
+                    if .cve.metrics.cvssMetricV31 then
+                        (.cve.metrics.cvssMetricV31[0].cvssData.baseScore|tostring)
+                    elif .cve.metrics.cvssMetricV30 then
+                        (.cve.metrics.cvssMetricV30[0].cvssData.baseScore|tostring)
+                    elif .cve.metrics.cvssMetricV2 then
+                        (.cve.metrics.cvssMetricV2[0].cvssData.baseScore|tostring)
+                    else
+                        "Unknown"
+                    end
+                ),
+                ""
+            ' >> "$BUSYBOX_CVE_REPORT"
+
+            echo -e "${GREEN}Results saved to:${NC} $BUSYBOX_CVE_REPORT"
+
+        fi
+
+    fi
+
+fi
