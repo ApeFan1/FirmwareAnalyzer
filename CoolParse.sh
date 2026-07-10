@@ -100,186 +100,381 @@ else
     rm -f "$REPORT"
 fi
 
+############################################################
+# Firmware Reconnaissance Module
+############################################################
+
 echo
 echo -e "${BLUE}=========================================${NC}"
-echo -e "${BLUE}Starting Password Audit${NC}"
+echo -e "${BLUE}Firmware Reconnaissance Module${NC}"
 echo -e "${BLUE}=========================================${NC}"
 
-read -p "Enter password list path (press Enter for rockyou.txt): " WORDLIST
+read -p "Run firmware reconnaissance? (Y/N): " RUN_RECON
 
-if [ -z "$WORDLIST" ]; then
-    WORDLIST="/usr/share/wordlists/rockyou.txt"
-    echo -e "${YELLOW}Using default wordlist: $WORDLIST${NC}"
-fi
+if [[ ! "$RUN_RECON" =~ ^[Yy]$ ]]; then
+    echo "Skipping reconnaissance."
+else
 
-if [ ! -f "$WORDLIST" ]; then
-    echo -e "${RED}Wordlist not found: $WORDLIST${NC}"
-    exit 1
-fi
+RECON_REPORT="$OUTPUT_DIR/firmware_recon_report.txt"
 
+echo "Firmware Reconnaissance Report" > "$RECON_REPORT"
+echo "Generated: $(date)" >> "$RECON_REPORT"
+echo "======================================================" >> "$RECON_REPORT"
+echo >> "$RECON_REPORT"
 
-CRACK_REPORT="$OUTPUT_DIR/password_audit_report.txt"
+echo "Beginning reconnaissance..."
 
-echo "Password Audit Report" > "$CRACK_REPORT"
-echo "Generated: $(date)" >> "$CRACK_REPORT"
-echo "========================================" >> "$CRACK_REPORT"
+############################################################
+# Counters
+############################################################
 
+SHELL_COUNT=0
+CONFIG_COUNT=0
+CERT_COUNT=0
+PRIVATE_KEY_COUNT=0
+SSH_KEY_COUNT=0
+SSL_CERT_COUNT=0
+IP_COUNT=0
+PORT_COUNT=0
+HOSTNAME_COUNT=0
+DOMAIN_COUNT=0
+URL_COUNT=0
+EMAIL_COUNT=0
+API_COUNT=0
+DNS_COUNT=0
+NTP_COUNT=0
+SSID_COUNT=0
+MAC_COUNT=0
 
-find "$OUTPUT_DIR" -type f \( \
-    -name "shadow" -o \
-    -name "passwd" \
-\) | while read -r HASHFILE
-do
+############################################################
+# Temporary files for duplicate removal
+############################################################
 
-    echo -e "${BLUE}Testing:${NC} $HASHFILE"
+TMPDIR=$(mktemp -d)
 
-    TEMP_HASH=$(mktemp)
+touch "$TMPDIR/shells"
+touch "$TMPDIR/configs"
+touch "$TMPDIR/certs"
+touch "$TMPDIR/privatekeys"
+touch "$TMPDIR/sshkeys"
+touch "$TMPDIR/sslcerts"
+touch "$TMPDIR/ip"
+touch "$TMPDIR/ports"
+touch "$TMPDIR/hostnames"
+touch "$TMPDIR/domains"
+touch "$TMPDIR/urls"
+touch "$TMPDIR/emails"
+touch "$TMPDIR/apis"
+touch "$TMPDIR/dns"
+touch "$TMPDIR/ntp"
+touch "$TMPDIR/ssid"
+touch "$TMPDIR/mac"
 
-    cat "$HASHFILE" > "$TEMP_HASH"
+############################################################
+# Helper Function
+############################################################
 
+record_item() {
 
-    {
-        echo
-        echo "========================================"
-        echo "File Tested:"
-        echo "$HASHFILE"
-        echo "========================================"
-        echo
-        echo "Hashes Tested:"
-        cat "$HASHFILE"
-        echo
-    } >> "$CRACK_REPORT"
+    CATEGORY="$1"
+    VALUE="$2"
+    FILE="$3"
+    STORE="$4"
 
+    if [ -z "$VALUE" ]; then
+        return
+    fi
 
-    john --wordlist="$WORDLIST" "$TEMP_HASH" >/dev/null 2>&1
+    if ! grep -Fxq "$VALUE" "$STORE"; then
 
-    RESULTS=$(john --show "$TEMP_HASH" 2>/dev/null)
-
-
-    if echo "$RESULTS" | grep -q ":"; then
-
-        echo -e "${GREEN}Password found for $HASHFILE${NC}"
+        echo "$VALUE" >> "$STORE"
 
         {
-            echo "STATUS: PASSWORD FOUND"
+            echo "[$CATEGORY]"
+            echo "Value : $VALUE"
+            echo "File  : $FILE"
             echo
-            echo "Recovered Credentials:"
-            echo "$RESULTS"
-        } >> "$CRACK_REPORT"
+        } >> "$RECON_REPORT"
 
-    else
-
-        echo -e "${YELLOW}No password found for $HASHFILE${NC}"
-
-        {
-            echo "STATUS: FAILED"
-            echo "No password recovered using supplied wordlist."
-        } >> "$CRACK_REPORT"
+        case "$CATEGORY" in
+            "Shell Script") ((SHELL_COUNT++));;
+            "Configuration") ((CONFIG_COUNT++));;
+            "Certificate") ((CERT_COUNT++));;
+            "Private Key") ((PRIVATE_KEY_COUNT++));;
+            "SSH Host Key") ((SSH_KEY_COUNT++));;
+            "SSL Certificate") ((SSL_CERT_COUNT++));;
+            "IP Address") ((IP_COUNT++));;
+            "Port") ((PORT_COUNT++));;
+            "Hostname") ((HOSTNAME_COUNT++));;
+            "Domain") ((DOMAIN_COUNT++));;
+            "URL") ((URL_COUNT++));;
+            "Email") ((EMAIL_COUNT++));;
+            "API Key") ((API_COUNT++));;
+            "DNS Server") ((DNS_COUNT++));;
+            "NTP Server") ((NTP_COUNT++));;
+            "WiFi SSID") ((SSID_COUNT++));;
+            "MAC Address") ((MAC_COUNT++));;
+        esac
 
     fi
 
+}
 
-    rm "$TEMP_HASH"
+############################################################
+# Scan Every Extracted Directory
+############################################################
 
-done
-
-
-echo
-echo -e "${GREEN}Password audit complete.${NC}"
-echo -e "${GREEN}Report saved to:${NC} $CRACK_REPORT"
-
-echo
-echo -e "${BLUE}=========================================${NC}"
-echo -e "${BLUE}Searching Extracted Firmware Files${NC}"
-echo -e "${BLUE}=========================================${NC}"
-
-FILE_REPORT="$OUTPUT_DIR/file_discovery_report.txt"
-
-echo "Firmware Interesting File Report" > "$FILE_REPORT"
-echo "Generated: $(date)" >> "$FILE_REPORT"
-
-
-for EXTRACTED in "$OUTPUT_DIR"/* 
+for EXTRACTED in "$OUTPUT_DIR"/*
 do
 
-    if [ -d "$EXTRACTED" ]; then
+    [ -d "$EXTRACTED" ] || continue
 
-        echo -e "${CYAN}Scanning:${NC} $EXTRACTED"
+    echo
+    echo "Scanning: $(basename "$EXTRACTED")"
 
-        {
-            echo
-            echo "##################################################"
-            echo "Extracted Folder:"
-            echo "$(basename "$EXTRACTED")"
-            echo "##################################################"
-        } >> "$FILE_REPORT"
+    find "$EXTRACTED" -type f | while read -r FILE
+    do
 
+        MIME=$(file -b "$FILE")
 
-        # Shell Scripts
-        {
-            echo
-            echo "------------------------------"
-            echo "Shell Scripts (.sh)"
-            echo "------------------------------"
-        } >> "$FILE_REPORT"
+        case "$MIME" in
+            *image*|*archive*|*compressed*|*data*)
+                continue
+                ;;
+        esac
 
-        find "$EXTRACTED" -type f -name "*.sh" | while read -r file
-        do
-            {
-                echo
-                echo "File: $(basename "$file")"
-                echo "Path: $(realpath "$file")"
-            } >> "$FILE_REPORT"
-        done
+   ####################################################
+# Shell Scripts
+####################################################
 
+if [[ "$FILE" == *.sh ]]; then
+    record_item "Shell Script" "$FILE" "$FILE" "$TMPDIR/shells"
+fi
 
-        # Configuration Files
-        {
-            echo
-            echo "------------------------------"
-            echo "Configuration Files"
-            echo "------------------------------"
-        } >> "$FILE_REPORT"
+####################################################
+# Configuration Files
+####################################################
 
-        find "$EXTRACTED" -type f \( \
-            -name "*.conf" -o \
-            -name "*.cfg" -o \
-            -name "*.ini" \
-        \) | while read -r file
-        do
-            {
-                echo
-                echo "File: $(basename "$file")"
-                echo "Path: $(realpath "$file")"
-            } >> "$FILE_REPORT"
-        done
+if [[ "$FILE" == *.conf || "$FILE" == *.cfg || "$FILE" == *.ini ]]; then
+    record_item "Configuration" "$FILE" "$FILE" "$TMPDIR/configs"
+fi
 
+####################################################
+# Certificates / Keys
+####################################################
 
-        # Certificates / Keys
-        {
-            echo
-            echo "------------------------------"
-            echo "Certificates and Keys"
-            echo "------------------------------"
-        } >> "$FILE_REPORT"
+if [[ "$FILE" == *.pem || "$FILE" == *.crt || "$FILE" == *.cer ]]; then
+    record_item "Certificate" "$FILE" "$FILE" "$TMPDIR/certs"
+fi
 
-        find "$EXTRACTED" -type f \( \
-            -name "*.pem" -o \
-            -name "*.key" \
-        \) | while read -r file
-        do
-            {
-                echo
-                echo "File: $(basename "$file")"
-                echo "Path: $(realpath "$file")"
-            } >> "$FILE_REPORT"
-        done
+if [[ "$FILE" == *.key ]]; then
+    record_item "Private Key" "$FILE" "$FILE" "$TMPDIR/privatekeys"
+fi
 
-    fi
+####################################################
+# SSH Host Keys
+####################################################
+
+grep -q "BEGIN OPENSSH PRIVATE KEY" "$FILE" 2>/dev/null &&
+record_item "SSH Host Key" "$FILE" "$FILE" "$TMPDIR/sshkeys"
+
+####################################################
+# SSL Certificates
+####################################################
+
+grep -q "BEGIN CERTIFICATE" "$FILE" 2>/dev/null &&
+record_item "SSL Certificate" "$FILE" "$FILE" "$TMPDIR/sslcerts"
+
+####################################################
+# IP Addresses
+####################################################
+
+grep -Eo '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' "$FILE" 2>/dev/null |
+sort -u |
+while read -r IP
+do
+    record_item "IP Address" "$IP" "$FILE" "$TMPDIR/ip"
+done
+
+####################################################
+# MAC Addresses
+####################################################
+
+grep -Eio '([0-9A-F]{2}:){5}[0-9A-F]{2}' "$FILE" 2>/dev/null |
+sort -u |
+while read -r MAC
+do
+    record_item "MAC Address" "$MAC" "$FILE" "$TMPDIR/mac"
+done
+
+####################################################
+# URLs
+####################################################
+
+grep -Eo 'https?://[^"[:space:]]+' "$FILE" 2>/dev/null |
+sort -u |
+while read -r URL
+do
+    record_item "URL" "$URL" "$FILE" "$TMPDIR/urls"
+done
+
+####################################################
+# Domain Names
+####################################################
+
+grep -Eo '([A-Za-z0-9-]+\.)+[A-Za-z]{2,}' "$FILE" 2>/dev/null |
+sort -u |
+while read -r DOMAIN
+do
+    record_item "Domain" "$DOMAIN" "$FILE" "$TMPDIR/domains"
+done
+
+####################################################
+# Email Addresses
+####################################################
+
+grep -Eio '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' "$FILE" 2>/dev/null |
+sort -u |
+while read -r EMAIL
+do
+    record_item "Email" "$EMAIL" "$FILE" "$TMPDIR/emails"
+done
+
+####################################################
+# Ports
+####################################################
+
+grep -Eio '(port|listen)[[:space:]]*[=:]?[[:space:]]*[0-9]{1,5}' "$FILE" 2>/dev/null |
+grep -Eo '[0-9]{1,5}' |
+awk '$1>0 && $1<=65535' |
+sort -nu |
+while read -r PORT
+do
+    record_item "Port" "$PORT" "$FILE" "$TMPDIR/ports"
+done
+
+####################################################
+# Hostnames
+####################################################
+
+grep -Eio 'hostname[[:space:]]*[=:][[:space:]]*[A-Za-z0-9._-]+' "$FILE" 2>/dev/null |
+awk -F= '{print $2}' |
+sed 's/^ *//;s/ *$//' |
+sort -u |
+while read -r HOST
+do
+    record_item "Hostname" "$HOST" "$FILE" "$TMPDIR/hostnames"
+done
+
+####################################################
+# DNS Servers
+####################################################
+
+grep -Eio '(nameserver|dns)[[:space:]]*[=:]?[[:space:]]*([0-9]{1,3}\.){3}[0-9]{1,3}' "$FILE" 2>/dev/null |
+grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' |
+sort -u |
+while read -r DNS
+do
+    record_item "DNS Server" "$DNS" "$FILE" "$TMPDIR/dns"
+done
+
+####################################################
+# NTP Servers
+####################################################
+
+grep -Eio '(ntp|server)[[:space:]]*[=:][[:space:]]*[A-Za-z0-9._-]+' "$FILE" 2>/dev/null |
+awk -F= '{print $2}' |
+sed 's/^ *//;s/ *$//' |
+sort -u |
+while read -r NTP
+do
+    record_item "NTP Server" "$NTP" "$FILE" "$TMPDIR/ntp"
+done
+
+####################################################
+# Wi-Fi SSIDs
+####################################################
+
+grep -Eio 'ssid[[:space:]]*[=:][[:space:]]*.*' "$FILE" 2>/dev/null |
+sed -E 's/.*ssid[[:space:]]*[=:][[:space:]]*//' |
+sort -u |
+while read -r SSID
+do
+    record_item "WiFi SSID" "$SSID" "$FILE" "$TMPDIR/ssid"
+done
+
+####################################################
+# API Keys / Tokens
+####################################################
+
+grep -Eio '(api[_-]?key|apikey|token|access[_-]?token|bearer)[[:space:]]*[=:][[:space:]]*[^[:space:]"]+' "$FILE" 2>/dev/null |
+while read -r API
+do
+    record_item "API Key" "$API" "$FILE" "$TMPDIR/apis"
+done
+####################################################
+# End File Scan
+####################################################
+
+    done
 
 done
 
+####################################################
+# Build Summary
+####################################################
+
+SUMMARY=$(mktemp)
+
+{
+echo "======================================================"
+echo "Firmware Reconnaissance Summary"
+echo "======================================================"
+echo
+printf "%-25s %s\n" "Shell Scripts:" "$SHELL_COUNT"
+printf "%-25s %s\n" "Configuration Files:" "$CONFIG_COUNT"
+printf "%-25s %s\n" "Certificates:" "$CERT_COUNT"
+printf "%-25s %s\n" "Private Keys:" "$PRIVATE_KEY_COUNT"
+printf "%-25s %s\n" "SSH Host Keys:" "$SSH_KEY_COUNT"
+printf "%-25s %s\n" "SSL Certificates:" "$SSL_CERT_COUNT"
+printf "%-25s %s\n" "IP Addresses:" "$IP_COUNT"
+printf "%-25s %s\n" "MAC Addresses:" "$MAC_COUNT"
+printf "%-25s %s\n" "Ports:" "$PORT_COUNT"
+printf "%-25s %s\n" "Hostnames:" "$HOSTNAME_COUNT"
+printf "%-25s %s\n" "Domain Names:" "$DOMAIN_COUNT"
+printf "%-25s %s\n" "URLs:" "$URL_COUNT"
+printf "%-25s %s\n" "Email Addresses:" "$EMAIL_COUNT"
+printf "%-25s %s\n" "API Keys / Tokens:" "$API_COUNT"
+printf "%-25s %s\n" "DNS Servers:" "$DNS_COUNT"
+printf "%-25s %s\n" "NTP Servers:" "$NTP_COUNT"
+printf "%-25s %s\n" "Wi-Fi SSIDs:" "$SSID_COUNT"
+echo
+echo "======================================================"
+echo
+} > "$SUMMARY"
+
+cat "$RECON_REPORT" >> "${SUMMARY}.tmp"
+cat "$SUMMARY" "${SUMMARY}.tmp" > "$RECON_REPORT"
+
+rm -f "${SUMMARY}.tmp"
+rm -f "$SUMMARY"
+
+####################################################
+# Cleanup
+####################################################
+
+rm -rf "$TMPDIR"
+
+####################################################
+# Finished
+####################################################
 
 echo
-echo -e "${GREEN}Interesting file scan complete.${NC}"
-echo -e "${GREEN}Report saved to:${NC} $FILE_REPORT"
+echo -e "${GREEN}=========================================${NC}"
+echo -e "${GREEN}Firmware Reconnaissance Complete${NC}"
+echo -e "${GREEN}=========================================${NC}"
+echo
+echo "Report saved to:"
+echo "$RECON_REPORT"
+
+fi
