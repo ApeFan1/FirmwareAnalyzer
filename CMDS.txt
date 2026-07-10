@@ -1,0 +1,37 @@
+-------------------------
+Initial Access:
+-------------------------
+
+ls /dev | grep USB - make sure that tigard is connected
+
+picocom -b 115200 /dev/ttyUSB0 - I use picocom for serial ctrl a and ctrl q exit
+
+#I logged picocom in ~/Desktop/Preso/TPlink201/TPcam.txt
+
+-------------------
+Firmware extract:
+-------------------
+
+cat /proc/mtd - check the flash partitions
+
+dd if=/dev/mtdblock0 of=/mnt/sdcard/firmware.bin bs=4M - a bit for bit copy from flash memory to your sdcard at 4 million bits per second
+if no sdcard use base64 or netcat
+
+-----------------
+Back on you PC:
+-----------------
+
+binwalk ~/Desktop/Preso/qualcom/QC011.bin - binwalking the file
+
+#if no binwalk success use strings cmd
+
+dd if=QC011.bin of=Squashfs.bin bs=1 skip=2621440 - extracting the part I want
+
+sudo mount ~/Desktop/Preso/qualcom/Squashfs.bin /mnt/Squash - mount the new file
+
+cd /mtn/Squash - go to mount
+
+ls - look around
+
+sudo umount /mnt/Squash -unmount the file
+
