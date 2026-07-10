@@ -1,0 +1,16 @@
+# Firmware files
+*.bin
+*.img
+*.rom
+
+# Binwalk output
+Extracted_Firmware/
+*.extracted/
+
+# Reports containing extracted data
+*_report.txt
+password*
+file_discovery_report.txt
+
+# Temporary files
+*.tmp
