@@ -18,20 +18,21 @@ dd if=/dev/mtdblock0 of=/mnt/sdcard/firmware.bin bs=4M - a bit for bit copy from
 if no sdcard use base64 or netcat
 
 -----------------
-Back on you PC:
+Back on you PC:  -done for you by parser script
 -----------------
 
-binwalk ~/Desktop/Preso/qualcom/QC011.bin - binwalking the file
+binwalk ~/Path/to/the/.bin - binwalking the file
 
 #if no binwalk success use strings cmd
 
-dd if=QC011.bin of=Squashfs.bin bs=1 skip=2621440 - extracting the part I want
+dd if=Firmware.bin of=fs.bin bs=1 skip=decimal offset - extracting the part I want
+# Or just binwalk -e and ignore the rest
 
-sudo mount ~/Desktop/Preso/qualcom/Squashfs.bin /mnt/Squash - mount the new file
+sudo mount ~/Path/to/.bin /mnt - mount the new file
 
-cd /mtn/Squash - go to mount
+cd /mtn - go to mount
 
 ls - look around
 
-sudo umount /mnt/Squash -unmount the file
+sudo umount /mnt -unmount the file
 
